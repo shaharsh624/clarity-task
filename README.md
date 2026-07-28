@@ -1,84 +1,130 @@
-# Backend / Tooling Task
+# Myntra Product Scraper
 
-## Problem Statement
-We need to scrape products from Myntra (both Product Detail Pages and Category pages).
+## How to Run
 
----
+Create a virtual environment:
 
-### Setup
-1. Clone the repository and set up a virtual environment:
-   ```bash
-   python -m venv clarityenv
-   
-   # Windows (PowerShell)
-   .\clarityenv\Scripts\Activate.ps1
-   
-   # Windows (Command Prompt)
-   .\clarityenv\Scripts\Activate.bat
+```bash
+python -m venv clarityenv
+```
 
-   # macOS/Linux
-   source clarityenv/bin/activate
-   ```
+Activate it:
 
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   playwright install chromium
-   ```
+```bash
+# Windows
+.\clarityenv\Scripts\Activate.ps1
 
-### Running the Application
-Start the FastAPI server:
+# macOS/Linux
+source clarityenv/bin/activate
+```
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+playwright install chromium
+```
+
+Start the server:
+
 ```bash
 uvicorn app.main:app
 ```
-Open your browser to `http://localhost:8000/docs` to use the Swagger UI, or run a `cURL` request to upload a product CSV:
-```bash
-curl -X POST "http://localhost:8000/upload" -F "file=@data/products_list.csv"
+
+Open:
+
 ```
-The output will be saved inside the `results/` directory as `[UUID].ndjson`.
+http://localhost:8000/docs
+```
+
+Upload a CSV containing the `product_id` column.
 
 ---
 
-## Methodology & Architecture
+## Approach
 
-* **Hydration State Extraction (`window.__myx`):** Rather than using fragile DOM/CSS selectors to parse pages, the scraper extracts data directly from Myntra's underlying hydration state JSON. This is resilient to class name updates and UI layouts.
-* **FastAPI & Playwright (Async):** Playwright provides a full Chromium context to execute client-side JavaScript and bypass standard request-based bot blocking. FastAPI natively handles asynchronous requests and multipart file uploads.
-* **Fault-Tolerant Scraping:** Navigation attempts retry up to 3 times. Errors on individual products are captured and recorded in the output file rather than halting the process.
-* **Incremental Writes:** Records are written to the output file line-by-line and flushed periodically to prevent data loss in the event of an interruption.
+The scraper uses **Playwright** because Myntra renders most of its data on the client side.
 
----
+Instead of scraping HTML elements, I extract data from Myntra's hydration state:
 
-## Core Assumptions
+- `window.__myx.pdpData` for product details
+- `window.__myx.searchData` for category pages
 
-1. **Category Slugs:** Category page slugs correspond directly to the lowercased, hyphenated product category (e.g., `articleType` "Casual Shoes" maps to `https://www.myntra.com/casual-shoes`).
-2. **Rate Limiting:** Sequential processing is preferred over parallel execution to prevent immediate blocks.
-3. **Public Availability:** Products are publicly accessible and do not require user authentication.
+This is much more stable than relying on CSS selectors.
+
+A single browser instance is reused for the entire CSV to reduce overhead. If a product fails, the error is recorded and the scraper continues with the remaining products.
 
 ---
 
-## Scope Decisions
+## Why NDJSON?
 
-### In-Scope
-- FastAPI CSV upload and parsing.
-- PDP metadata extraction (Brand, Title, Description, Images, Ratings, Ratings Count).
-- Category page sponsored (PLA) ads scraping (extracting up to the first 3 ads).
-- Fault-tolerant, sequential loop with immediate disk flush.
+Results are written as **NDJSON** (one JSON object per line) instead of one large JSON array.
 
-### Out-of-Scope
-- **Concurrency:** Multi-threaded page navigation was omitted to avoid quick rate-limit blocks.
-- **Proxy Rotation:** Integration with residential proxy networks was left out to keep setup simple.
-- **Web UI:** Scoped out to focus on a robust, fault-tolerant backend core.
+This allows the scraper to:
 
-### Future Roadmap
-1. **Asynchronous Task Queue:** Return a task ID immediately on upload and process the scraping in the background to avoid HTTP timeout limits on large files.
-2. **Proxy Integration:** Incorporate residential proxy pools and user-agent rotation to enable scalable, parallel crawling.
-3. **Memory Recycling:** Periodically refresh the Playwright browser/context to avoid long-term memory leaks during large scrape lists.
+- save progress continuously,
+- recover partial results if the process stops,
+- avoid keeping the entire output in memory.
+
+The file is flushed after every batch of records to minimise data loss.
 
 ---
 
-## Sample Output
+## Assumptions
+
+- Product pages are publicly accessible.
+- Sponsored products are available in `window.__myx.searchData.results.plaProducts`.
+- Category URLs can be derived from the product category.
+
+---
+
+## Scope
+
+### Included
+
+- CSV upload
+- Product detail scraping
+- Sponsored product scraping
+- Retry and error handling
+- Incremental NDJSON output
+
+### Not Included
+
+- Proxy rotation
+- Parallel scraping
+- Background jobs
+- Frontend
+- Database
+
+---
+
+## If I Had More Time
+
+The next improvements would be:
+
+- Move scraping to a background job and return a task ID immediately.
+- Add proxy/user-agent rotation for better reliability.
+- Periodically restart the browser context during long scraping sessions.
+- Add job status and progress endpoints.
+
+---
+
+## Known Limitations
+
+- The scraper depends on Myntra's current hydration data structure.
+- Some products may fail if they are removed or temporarily unavailable.
+- Processing is sequential to reduce the chance of being rate-limited.
+
+---
+
+## Result
+
+**Input:** [CSV File](uploads/00214a18-a367-4bba-8df8-ed95062e4ca8.csv)
+
+**Output:** [NDJSON file](results/00214a18-a367-4bba-8df8-ed95062e4ca8.ndjson)
 
 ```json
-{"product_id": "35512522", "brand": "EcoRight", "title": "Eve Women Textured Crossbody Shoulder Bag", "description": "Coffee brown textured sling bag<br>1 main compartment, has a zip closure, 2 inner pockets<br>With a detachable sling strap<br>Warranty: 6 months<br>Warranty provided by brand owner/manufacturer", "rating": 4.532258064516129, "ratings_count": 186, "category": "Handbags", "images": ["http://assets.myntassets.com/assets/images/2026/JULY/7/gDRYysJi_2ab1f01199b745e3b46dedcaa4b6eb41.jpg", "http://assets.myntassets.com/assets/images/2026/JULY/7/ZjsQlV6x_08d567e2c5304902b46a569c0b84cdb5.jpg"], "sponsored_products": [{"title": "Accessorize Women Colorblock Dorota Monogram Satchel Bag", "brand": "Accessorize", "rating": 4.239436626434326, "price": 2167, "mrp": 6995, "discount": 4828}, {"title": "Allen Solly Brand Logo Printed Structured Sling Bag", "brand": "Allen Solly", "rating": 4.589473724365234, "price": 1559, "mrp": 2599, "discount": 1040}, {"title": "Accessorize London Women's Erin Contrast Stitch Handheld Bag", "brand": "Accessorize", "rating": 4.365853786468506, "price": 1586, "mrp": 6895, "discount": 5309}]}
-{"product_id": "66138598", "error": "Product data not found."}
+{"product_id":"35512522","brand":"EcoRight","title":"Eve Women Textured Crossbody Shoulder Bag","rating":4.53,"category":"Handbags","images":["...","..."],"sponsored_products":[...]}
+
+{"product_id":"66138598","error":"Product data not found."}
 ```
