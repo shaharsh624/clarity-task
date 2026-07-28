@@ -1,4 +1,5 @@
 from playwright.async_api import Page
+from urllib.parse import quote
 
 
 async def scrape_product(page: Page, product_id: str):
@@ -78,6 +79,9 @@ async def scrape_product(page: Page, product_id: str):
 
         category = analytics.get("articleType")
 
+        # Category Ads
+        ads = await scrape_category_ads(page, category)
+
         # ---------------------------
         # Return
         # ---------------------------
@@ -90,8 +94,44 @@ async def scrape_product(page: Page, product_id: str):
             "ratings_count": ratings_count,
             "category": category,
             "images": images,
+            "sponsored_products": ads,
         }
 
     except Exception as e:
 
         return {"product_id": product_id, "error": str(e)}
+
+
+async def scrape_category_ads(page: Page, category: str):
+    """
+    Scrape first 3 sponsored (PLA) products from a category page.
+    """
+
+    url = f"https://www.myntra.com/{quote(category.lower().replace(' ', '-'))}"
+
+    await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+
+    data = await page.evaluate("window.__myx?.searchData")
+
+    if not data:
+        return []
+
+    results = data.get("results", {})
+    pla_products = results.get("plaProducts", [])
+
+    ads = []
+
+    for product in pla_products[:3]:
+
+        ads.append(
+            {
+                "title": product.get("productName"),
+                "brand": product.get("brand"),
+                "rating": product.get("rating"),
+                "price": product.get("price"),
+                "mrp": product.get("mrp"),
+                "discount": product.get("discount"),
+            }
+        )
+
+    return ads
