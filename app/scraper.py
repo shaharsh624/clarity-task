@@ -1,0 +1,97 @@
+from playwright.async_api import Page
+
+
+async def scrape_product(page: Page, product_id: str):
+    """
+    Scrape a single Myntra product using its product ID.
+    """
+
+    url = f"https://www.myntra.com/{product_id}"
+
+    try:
+        # 3 attempts for a page
+        for attempt in range(3):
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                break
+            except Exception:
+                if attempt == 1:
+                    raise
+
+        data = await page.evaluate("window.__myx?.pdpData")
+
+        if not data:
+            raise Exception("Product data not found.")
+
+        # ---------------------------
+        # Brand
+        # ---------------------------
+        brand = data.get("brand", {}).get("name")
+
+        # ---------------------------
+        # Title
+        # ---------------------------
+        title = data.get("name", "")
+
+        if brand and title.startswith(brand):
+            title = title.replace(brand, "", 1).strip()
+
+        # ---------------------------
+        # Description
+        # ---------------------------
+        description = None
+
+        descriptors = data.get("descriptors", [])
+        if descriptors:
+            description = descriptors[0].get("description")
+
+        # ---------------------------
+        # Images
+        # ---------------------------
+        images = []
+
+        albums = data.get("media", {}).get("albums", [])
+
+        if albums:
+
+            first_album = albums[0]
+
+            for image in first_album.get("images", [])[:2]:
+
+                image_url = image.get("imageURL")
+
+                if image_url:
+                    images.append(image_url)
+
+        # ---------------------------
+        # Rating
+        # ---------------------------
+        ratings = data.get("ratings", {})
+
+        rating = ratings.get("averageRating")
+        ratings_count = ratings.get("totalCount")
+
+        # ---------------------------
+        # Category
+        # ---------------------------
+        analytics = data.get("analytics", {})
+
+        category = analytics.get("articleType")
+
+        # ---------------------------
+        # Return
+        # ---------------------------
+        return {
+            "product_id": product_id,
+            "brand": brand,
+            "title": title,
+            "description": description,
+            "rating": rating,
+            "ratings_count": ratings_count,
+            "category": category,
+            "images": images,
+        }
+
+    except Exception as e:
+
+        return {"product_id": product_id, "error": str(e)}
